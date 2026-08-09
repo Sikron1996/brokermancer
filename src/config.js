@@ -13,5 +13,7 @@ export const SITE_CONFIG = {
   },
 
   explorerBaseUrl: "https://robinhoodchain.blockscout.com",
+  xUrl: import.meta.env.VITE_X_URL || "https://x.com/CHANGE_ME",
+  openSeaUrl: import.meta.env.VITE_OPENSEA_URL || "https://opensea.io/collection/CHANGE_ME",
   siteUrl: typeof window !== "undefined" ? window.location.origin : "https://broker-mancer.vercel.app"
 };
