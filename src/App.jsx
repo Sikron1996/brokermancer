@@ -59,6 +59,8 @@ export default function App(){
   const [previews,setPreviews] = useState([]);
   const [status,setStatus] = useState("");
   const [busy,setBusy] = useState(false);
+  const [activity,setActivity] = useState([]);
+  const [activityLoading,setActivityLoading] = useState(true);
 
   const [payToken,setPayToken] = useState("ETH");
   const [swapAmount,setSwapAmount] = useState("0.01");
@@ -271,138 +273,267 @@ export default function App(){
     } catch { return null; }
   })();
 
-  return <main>
-    <div className="bg-grid"/>
-    <header>
+  const activityAbi = [
+    "event Minted(address indexed to,uint256 indexed tokenId,uint256 seed)"
+  ];
+
+  function ago(ts){
+    if(!ts) return "";
+    const sec = Math.max(0, Math.floor(Date.now()/1000) - Number(ts));
+    if(sec < 10) return "just now";
+    if(sec < 60) return `${sec}s ago`;
+    if(sec < 3600) return `${Math.floor(sec/60)}m ago`;
+    return `${Math.floor(sec/3600)}h ago`;
+  }
+
+  const loadActivity = useCallback(async()=>{
+    try{
+      const nft = new Contract(NFT_ADDRESS, activityAbi, readProvider);
+      const latest = await readProvider.getBlockNumber();
+      const fromBlock = Math.max(0, latest - 25000);
+      const events = await nft.queryFilter(nft.filters.Minted(), fromBlock, latest);
+      const recent = events.slice(-8).reverse();
+
+      const rows = await Promise.all(recent.map(async(ev)=>{
+        let blockTs = 0;
+        try{
+          const block = await readProvider.getBlock(ev.blockNumber);
+          blockTs = block?.timestamp || 0;
+        }catch{}
+
+        return {
+          to: ev.args?.to,
+          tokenId: ev.args?.tokenId?.toString?.() || "",
+          seed: ev.args?.seed?.toString?.() || "",
+          txHash: ev.transactionHash,
+          blockNumber: ev.blockNumber,
+          timestamp: blockTs
+        };
+      }));
+
+      setActivity(rows);
+    }catch(e){
+      console.error("Activity load failed", e);
+    }finally{
+      setActivityLoading(false);
+    }
+  },[]);
+
+  useEffect(()=>{
+    loadActivity();
+    const nft = new Contract(NFT_ADDRESS, activityAbi, readProvider);
+
+    const onMint = async(to, tokenId, seed, event)=>{
+      let blockTs = 0;
+      try{
+        const block = await readProvider.getBlock(event.log.blockNumber);
+        blockTs = block?.timestamp || 0;
+      }catch{}
+
+      setActivity(prev => [{
+        to,
+        tokenId: tokenId.toString(),
+        seed: seed.toString(),
+        txHash: event.log.transactionHash,
+        blockNumber: event.log.blockNumber,
+        timestamp: blockTs
+      }, ...prev.filter(x=>x.txHash!==event.log.transactionHash || x.tokenId!==tokenId.toString())].slice(0,8));
+    };
+
+    nft.on("Minted", onMint);
+    const timer = setInterval(loadActivity, 20000);
+
+    return ()=>{
+      clearInterval(timer);
+      nft.off("Minted", onMint);
+    };
+  },[loadActivity]);
+
+  return <main className="premium-shell">
+    <div className="ambient ambient-a"/>
+    <div className="ambient ambient-b"/>
+    <div className="grain"/>
+
+    <header className="premium-header">
       <Logo/>
-      <div className="header-meta">
-        <span className={mintOpen?"live":"closed"}>{mintOpen?"● LIVE":"● CLOSED"}</span>
-        <span>{minted.toString()}/4444</span>
+      <div className="nav-center">
+        <span className={mintOpen?"live":"closed"}>{mintOpen?"● MINT LIVE":"● CLOSED"}</span>
+        <span>{minted.toString()} / 4,444</span>
       </div>
       <div className="head-actions">
-        <a className="social-btn" href={SITE_CONFIG.openSeaUrl} target="_blank" rel="noreferrer">OS</a>
-        <a className="social-btn" href={SITE_CONFIG.xUrl} target="_blank" rel="noreferrer">X</a>
-        <button className="wallet-btn" onClick={()=>open({view:isConnected?"Account":"Connect"})}>
-          {isConnected&&address?short(address):"CONNECT"}
+        <a className="icon-link" href={SITE_CONFIG.openSeaUrl} target="_blank" rel="noreferrer">OS</a>
+        <a className="icon-link" href={SITE_CONFIG.xUrl} target="_blank" rel="noreferrer">𝕏</a>
+        <button className="connect-premium" onClick={()=>open({view:isConnected?"Account":"Connect"})}>
+          <i/>{isConnected&&address?short(address):"CONNECT"}
         </button>
       </div>
     </header>
 
-    <div className="page">
-      <section className="top">
-        <div className="intro card">
-          <div className="tag">FULLY ON-CHAIN · ROBINHOOD CHAIN</div>
-          <div className="intro-row">
-            <div>
-              <h1>BROKER <em>MANCER</em></h1>
-              <p>Mint pixel brokers with <b>$MANCER</b> and receive <b>5,000 $BRCER</b> per NFT.</p>
-            </div>
-            <div className="mini-art">
-              {previews[0] && <img src={previews[0]} alt="Broker Mancer"/>}
-            </div>
+    <div className="premium-page">
+      <section className="hero-premium">
+        <div className="hero-copy-premium">
+          <div className="micro-label"><i/> 4,444 FULLY ON-CHAIN BROKERS</div>
+          <h1>BROKER<br/><em>MANCER</em></h1>
+          <p>Born on-chain. Minted with <b>$MANCER</b>.<br/>Every Broker unlocks <b>5,000 $BRCER</b>.</p>
+
+          <div className="hero-numbers">
+            <div><span>MINTED</span><b>{minted.toString()}</b></div>
+            <div><span>REMAINING</span><b>{remaining.toString()}</b></div>
+            <div><span>$BRCER ISSUED</span><b>{fmt(brcerSupply,18,0)}</b></div>
           </div>
-          <div className="stats-row">
-            <Stat label="MINTED" value={minted.toString()} accent/>
-            <Stat label="LEFT" value={remaining.toString()}/>
-            <Stat label="$BRCER" value={fmt(brcerSupply,18,0)}/>
-          </div>
-          <div className="progress"><i style={{width:`${pct}%`}}/></div>
+          <div className="premium-progress"><i style={{width:`${pct}%`}}/></div>
         </div>
 
-        <div className="preview-strip card">
-          <div className="bar"><span>ON-CHAIN SVG</span><a href={`${EXPLORER}/address/${NFT_ADDRESS}`} target="_blank" rel="noreferrer">CONTRACT ↗</a></div>
-          <div className="thumbs">
-            {previews.map((src,i)=><img src={src} key={i} alt={`Preview ${i+1}`}/>)}
-          </div>
+        <div className="hero-gallery">
+          {previews.slice(0,4).map((src,i)=>
+            <div className={`premium-nft nft-${i}`} key={i}>
+              <img src={src} alt={`Broker Mancer ${i+1}`}/>
+              <span>ON-CHAIN // {String([777,1313,2222,3333][i]).padStart(4,"0")}</span>
+            </div>
+          )}
         </div>
       </section>
 
-      <section className="actions">
-        <article className="card action-card swap-card">
-          <div className="bar"><span>01 / SWAP TO $MANCER</span><b>ON-SITE</b></div>
+      <section className="trade-deck">
+        <article className="glass-card swap-premium">
+          <div className="card-head">
+            <div><small>01</small><h2>Acquire $MANCER</h2></div>
+            <span>SWAP ON-SITE</span>
+          </div>
 
-          <div className="pay-selector">
+          <div className="token-tabs">
             <button className={payToken==="ETH"?"active":""} onClick={()=>{setPayToken("ETH");setSwapAmount("0.01");setQuote(null)}}>ETH</button>
             <button className={payToken==="USDG"?"active":""} onClick={()=>{setPayToken("USDG");setSwapAmount("10");setQuote(null)}}>USDG</button>
           </div>
 
-          <div className="swap-input">
-            <div>
+          <div className="premium-swap-box">
+            <div className="amount-side">
               <small>YOU PAY</small>
-              <input
-                value={swapAmount}
-                onChange={e=>{setSwapAmount(e.target.value);setQuote(null)}}
-                inputMode="decimal"
-                placeholder={payToken==="ETH"?"0.01":"10"}
-              />
+              <input value={swapAmount} onChange={e=>{setSwapAmount(e.target.value);setQuote(null)}} inputMode="decimal"/>
             </div>
-            <b>{payToken}</b>
+            <div className="asset-pill">{payToken}</div>
           </div>
 
-          <div className="swap-arrow">↓</div>
+          <div className="swap-divider"><span>↓</span></div>
 
-          <div className="swap-output">
-            <div>
+          <div className="premium-swap-box output">
+            <div className="amount-side">
               <small>YOU RECEIVE</small>
               <strong>{quotedMancer || (quote ? "LIVE QUOTE" : "—")}</strong>
             </div>
-            <b>$MANCER</b>
+            <div className="asset-pill mancer">$MANCER</div>
           </div>
 
-          <div className="swap-meta">
-            <span>Balance <b>{isConnected?fmt(mancerBalance):"—"} $MANCER</b></span>
+          <div className="fine-row">
+            <span>Balance <b>{isConnected?fmt(mancerBalance):"—"}</b></span>
             <span>Slippage <b>0.5%</b></span>
           </div>
 
           {!isConnected ? (
-            <button className="action-btn secondary" onClick={()=>open({view:"Connect"})}>CONNECT WALLET</button>
+            <button className="premium-cta dark" onClick={()=>open({view:"Connect"})}>CONNECT WALLET</button>
           ) : !quote ? (
-            <button className="action-btn secondary" disabled={quoting} onClick={getQuote}>
-              {quoting?"GETTING QUOTE…":"GET LIVE QUOTE"}
-            </button>
+            <button className="premium-cta dark" disabled={quoting} onClick={getQuote}>{quoting?"FETCHING QUOTE…":"GET LIVE QUOTE"}</button>
           ) : (
-            <button className="action-btn secondary swap-now" disabled={swapping} onClick={swapToMancer}>
-              {swapping?"SWAPPING…":`SWAP ${payToken} → $MANCER`}
-            </button>
+            <button className="premium-cta dark" disabled={swapping} onClick={swapToMancer}>{swapping?"SWAPPING…":`SWAP ${payToken} → $MANCER`}</button>
           )}
         </article>
 
-        <article className="card action-card mint-card">
-          <div className="bar"><span>02 / MINT</span><b>+5,000 $BRCER</b></div>
-          <div className="mint-controls">
+        <article className="glass-card mint-premium">
+          <div className="card-head">
+            <div><small>02</small><h2>Mint Broker</h2></div>
+            <span className="reward-chip">+5,000 $BRCER</span>
+          </div>
+
+          <div className="mint-price">
+            <small>PRICE PER NFT</small>
+            <strong>250 <em>$MANCER</em></strong>
+          </div>
+
+          <div className="qty-premium">
             <button onClick={()=>setQty(Math.max(1,qty-1))}>−</button>
-            <div><strong>{qty}</strong><small>NFT</small></div>
+            <div><b>{qty}</b><small>QUANTITY</small></div>
             <button onClick={()=>setQty(qty+1)}>+</button>
           </div>
-          <div className="compact-info">
-            <span>COST <b>{fmt(totalCost)} $MANCER</b></span>
-            <span>REWARD <b>{(qty*5000).toLocaleString()} $BRCER</b></span>
+
+          <div className="mint-summary">
+            <div><span>TOTAL</span><b>{fmt(totalCost)} $MANCER</b></div>
+            <div><span>REWARD</span><b>{(qty*5000).toLocaleString()} $BRCER</b></div>
           </div>
+
           {!isConnected
-            ? <button className="action-btn" onClick={()=>open({view:"Connect"})}>CONNECT WALLET</button>
+            ? <button className="premium-cta" onClick={()=>open({view:"Connect"})}>CONNECT TO MINT</button>
             : !approved
-              ? <button className="action-btn" disabled={busy||!canMint} onClick={approve}>{canMint?"APPROVE $MANCER":"NOT ENOUGH $MANCER"}</button>
-              : <button className="action-btn" disabled={busy||!canMint||!mintOpen} onClick={mint}>{mintOpen?`MINT ${qty}`:"MINT CLOSED"}</button>
+              ? <button className="premium-cta" disabled={busy||!canMint} onClick={approve}>{canMint?"APPROVE $MANCER":"INSUFFICIENT $MANCER"}</button>
+              : <button className="premium-cta" disabled={busy||!canMint||!mintOpen} onClick={mint}>{mintOpen?`MINT ${qty} BROKER${qty>1?"S":""}`:"MINT CLOSED"}</button>
           }
         </article>
       </section>
 
-      <section className="wallet-grid">
-        <Stat label="YOUR $MANCER" value={isConnected?fmt(mancerBalance):"—"} accent/>
-        <Stat label="YOUR $BRCER" value={isConnected?fmt(brcerBalance,18,0):"—"}/>
-        <Stat label="YOUR NFTs" value={isConnected?nftBalance.toString():"—"}/>
-      </section>
+      <section className="activity-card">
+        <div className="activity-head">
+          <div>
+            <small>LIVE</small>
+            <h2>Mint Activity</h2>
+          </div>
+          <span><i/> ON-CHAIN EVENTS</span>
+        </div>
 
-      <section className="bottom card">
-        <div className="bar"><span>MECHANICS</span><span>250 $MANCER → 1 NFT + 5,000 $BRCER</span></div>
-        <div className="contracts">
-          <a href={SITE_CONFIG.openSeaUrl} target="_blank" rel="noreferrer">OPENSEA ↗</a>
-          <a href={SITE_CONFIG.xUrl} target="_blank" rel="noreferrer">X ↗</a>
-          <a href={`${EXPLORER}/address/${NFT_ADDRESS}`} target="_blank" rel="noreferrer">NFT ↗</a>
-          <a href={`${EXPLORER}/token/${BRCER_ADDRESS}`} target="_blank" rel="noreferrer">$BRCER ↗</a>
-          <a href={`${EXPLORER}/token/${MANCER_ADDRESS}`} target="_blank" rel="noreferrer">$MANCER ↗</a>
+        <div className="activity-list">
+          {activityLoading && activity.length===0 ? (
+            <div className="activity-empty">LOADING RECENT MINTS…</div>
+          ) : activity.length===0 ? (
+            <div className="activity-empty">NO PUBLIC MINTS YET</div>
+          ) : activity.map((item,i)=>(
+            <a
+              className="activity-row"
+              href={`${EXPLORER}/tx/${item.txHash}`}
+              target="_blank"
+              rel="noreferrer"
+              key={`${item.txHash}-${item.tokenId}-${i}`}
+            >
+              <div className="activity-avatar">
+                {previews.length > 0 && <img src={previews[Number(BigInt(item.seed || "0") % BigInt(previews.length))]} alt="Broker"/>}
+              </div>
+              <div className="activity-wallet">
+                <b>{short(item.to)}</b>
+                <span>{ago(item.timestamp)}</span>
+              </div>
+              <div className="activity-token">
+                <span>MINTED</span>
+                <b>Broker #{item.tokenId}</b>
+              </div>
+              <div className="activity-value">
+                <span>PAID</span>
+                <b>250 $MANCER</b>
+              </div>
+              <div className="activity-reward">
+                <span>REWARD</span>
+                <b>+5,000 $BRCER</b>
+              </div>
+              <div className="activity-open">↗</div>
+            </a>
+          ))}
         </div>
       </section>
+
+      <section className="portfolio-bar">
+        <div><span>YOUR $MANCER</span><b>{isConnected?fmt(mancerBalance):"—"}</b></div>
+        <div><span>YOUR $BRCER</span><b>{isConnected?fmt(brcerBalance,18,0):"—"}</b></div>
+        <div><span>YOUR BROKERS</span><b>{isConnected?nftBalance.toString():"—"}</b></div>
+        <div className="portfolio-links">
+          <a href={SITE_CONFIG.openSeaUrl} target="_blank" rel="noreferrer">OPENSEA ↗</a>
+          <a href={SITE_CONFIG.xUrl} target="_blank" rel="noreferrer">X ↗</a>
+        </div>
+      </section>
+
+      <footer className="premium-footer">
+        <Logo/>
+        <span>250 $MANCER → 1 BROKER + 5,000 $BRCER</span>
+        <div>
+          <a href={`${EXPLORER}/address/${NFT_ADDRESS}`} target="_blank" rel="noreferrer">CONTRACT</a>
+          <a href={`${EXPLORER}/token/${BRCER_ADDRESS}`} target="_blank" rel="noreferrer">$BRCER</a>
+        </div>
+      </footer>
     </div>
 
     {status&&<div className="status">{status}</div>}
